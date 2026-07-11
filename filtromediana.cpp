@@ -30,6 +30,18 @@ typedef struct {
     Borda borda;
 } Letra;
 
+int centroY(const Letra &l) {
+    return (l.borda.cantoSE.first + l.borda.cantoIE.first) / 2;
+}
+
+auto esquerdaX = [](const Letra &l) {
+    return l.borda.cantoIE.second;
+};
+
+auto direitaX = [](const Letra &l) {
+    return l.borda.cantoID.second;
+};
+
 int menorX(vector<pair<int, int>> &componente) {
     int resposta = INF;
 
@@ -241,23 +253,19 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    int contador = 0;
-    for(auto &letra : conjuntoLetras) {
-        cout << "CC " << contador++ << endl;
+    int toleranciaLinha = 10;
 
-        sort(letra.pixels.begin(), letra.pixels.end(), [](pair<int,int> &a, pair<int,int> &b){
-            if(a.first != b.first) return a.first > b.first;
-            return a.second > b.second;
-        });
-    }
+    // Ordeno as palavras de cima pra baixo e da esquerda pra direita
+    sort(conjuntoLetras.begin(), conjuntoLetras.end(), [&](const Letra &a, const Letra &b) {
+        int yA = centroY(a);
+        int yB = centroY(b);
 
-    sort(conjuntoLetras.begin(), conjuntoLetras.end(), [](const Letra &a, const Letra &b) {
-    if(a.pixels[0].first != b.pixels[0].first) return a.pixels[0].first < b.pixels[0].first;
+        // Usando o centro da palavra + tolerancia pra não dar falso positivo por conta de letras tipo p
+        if(abs(yA - yB) > toleranciaLinha) {
+            return yA < yB;
+        }
 
-        // Preciso descobrir quem é o menor b[x], pra eu comparar com ele, porque assim, eu vou comparar o maior elemento do primeiro
-        // com o menor elemento do segundo array (dado que eles estão na mesma altura)
-
-        return a.pixels[0].second < b.pixels[0].second;
+        return esquerdaX(a) < esquerdaX(b);
     });
 
     // Agora eu preciso tirar a diferença entre os componentes que foram ordenados, uma vez que agora eu tenho o ponto mais abaixo e mais 
@@ -278,10 +286,12 @@ int main(int argc, char* argv[]) {
             auto& atual = conjuntoLetras[i];
             auto& anterior = conjuntoLetras[i-1];
 
-            int yAtual = atual.borda.cantoIE.first;
-            int yAnterior = anterior.borda.cantoIE.first;
+            int yAtual = centroY(atual);
+            int yAnterior = centroY(anterior);
+            int toleranciaLinha = 12;
 
-            if(yAtual > yAnterior) { // Isso aqui só acontece se a altura do canto aumentar de um pro outro, isso só rola se quebrar a linha
+            // Se a diferença do centro deles for de até 4 pixels, tá tranquilo, se for maior do que isso, é uma linha nova
+            if(abs(yAtual - yAnterior) > toleranciaLinha) {
                 // Achamos uma nova linha, somo uma nova palavra
                 contadorPalavras++;
                 palavras.push_back(palavra);

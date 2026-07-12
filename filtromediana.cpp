@@ -116,6 +116,52 @@ int ehValido(int ni, int nj, int n, int m) {
     return (ni >= 0 && ni < n && nj >= 0 && nj < m);
 }
 
+int contarColunasPorProjecaoVertical(const vector<vector<int>> &matrizFiltrada) {
+    if(matrizFiltrada.empty() || matrizFiltrada[0].empty()) {
+        return 0;
+    }
+
+    // Varre a imagem inteira e mede quantos pixels pretos caem em cada coluna
+    int h = matrizFiltrada.size();
+    int w = matrizFiltrada[0].size();
+
+    vector<int> ocupacao(w, 0);
+    for(int i = 0; i < h; i++) {
+        for(int j = 0; j < w; j++) {
+            if(matrizFiltrada[i][j] == 1) {
+                ocupacao[j]++;
+            }
+        }
+    }
+
+    // Só serão consideradas colunas realmente ocupadas, evitando contar ruído isolado
+    int limiarAtivo = max(3, h / 300);
+    int larguraMinimaColuna = max(20, w / 40);
+
+    int contador = 0;
+    int inicioBloco = -1;
+
+    for(int j = 0; j < w; j++) {
+        if(ocupacao[j] >= limiarAtivo) {
+            if(inicioBloco == -1) {
+                inicioBloco = j;
+            }
+        } else if(inicioBloco != -1) {
+            if(j - inicioBloco >= larguraMinimaColuna) {
+                contador++;
+            }
+            inicioBloco = -1;
+        }
+    }
+
+    // Se a última faixa ativa chegou até o fim da imagem, fecha a contagem aqui
+    if(inicioBloco != -1 && w - inicioBloco >= larguraMinimaColuna) {
+        contador++;
+    }
+
+    return max(1, contador);
+}
+
 void dfs(pair<int, int> inicio, vector<vector<int>> &matriz, vector<vector<int>> &cor, int n, int m, vector<pair<int, int>> &componenteConexo, Extremos &extremos) {
     int i = inicio.first;
     int j = inicio.second;
@@ -143,18 +189,90 @@ void dfs(pair<int, int> inicio, vector<vector<int>> &matriz, vector<vector<int>>
 
 }
 
+void pintarBorda(vector<vector<Letra>>& palavras, vector<vector<int>>& matrizFiltrada, int h, int w) {
+    vector<vector<array<int, 3>>> imagemRGB(h, vector<array<int, 3>>(w));
+
+    for(int p = 0; p < (int)palavras.size(); p++) {
+        auto& palavra = palavras[p];
+
+        int palavraExtremoE = INF;
+        int palavraExtremoD = -INF;
+        int palavraExtremoC = INF;
+        int palavraExtremoB = -INF;
+
+        // Encontra os extremos da palavra com base nas letras que a compõem
+        for(auto& letra : palavra) {
+            palavraExtremoE = min(palavraExtremoE, letra.borda.cantoIE.second);
+            palavraExtremoD = max(palavraExtremoD, letra.borda.cantoID.second);
+            palavraExtremoC = min(palavraExtremoC, letra.borda.cantoSE.first);
+            palavraExtremoB = max(palavraExtremoB, letra.borda.cantoIE.first);
+        }
+
+        // Borda de baixo
+        int linhaSublin = palavraExtremoB + 2;
+        for(int espessura = 0; espessura < 1; espessura++) {
+            int linhaDraw = linhaSublin + espessura;
+            if(linhaDraw >= 0 && linhaDraw < h) {
+                for(int col = palavraExtremoE - 2; col <= palavraExtremoD; col++) {
+                    if(col >= 0 && col < w) {
+                        matrizFiltrada[linhaDraw][col] = 1;
+                    }
+                }
+            }
+        }
+
+        // Borda de cima
+        linhaSublin = palavraExtremoC + 2;
+        for(int espessura = 0; espessura < 1; espessura++) {
+            int linhaDraw = linhaSublin + espessura - 8;
+            if(linhaDraw >= 0 && linhaDraw < h) {
+                for(int col = palavraExtremoE - 1; col <= palavraExtremoD; col++) {
+                    if(col >= 0 && col < w) {
+                        matrizFiltrada[linhaDraw][col] = 1;
+                    }
+                }
+            }
+        }
+
+        // Borda de esquerda
+        linhaSublin = palavraExtremoE + 2;
+        for(int espessura = 0; espessura < 1; espessura++) {
+            int linhaDraw = linhaSublin + espessura - 4;
+            if(linhaDraw >= 0 && linhaDraw < w) {
+                for(int col = palavraExtremoC - 6; col <= palavraExtremoB; col++) {
+                    if(col >= 0 && col < h) {
+                        matrizFiltrada[col][linhaDraw] = 1;
+                    }
+                }
+            }
+        }
+
+        // Borda da direita
+        linhaSublin = palavraExtremoD + 2;
+        for(int espessura = 0; espessura < 1; espessura++) {
+            int linhaDraw = linhaSublin + espessura;
+            if(linhaDraw >= 0 && linhaDraw < w) {
+                for(int col = palavraExtremoC - 6; col <= palavraExtremoB; col++) {
+                    if(col >= 0 && col < h) {
+                        matrizFiltrada[col][linhaDraw] = 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
 // 3. APENAS UMA função main
 int main(int argc, char* argv[]) {
     _ // Ativa o I/O rápido
 
     if(argc < 3) {
-        cout << "Não há argumentos o suficiente.\n" << endl;
+        cout << "Uso: " << argv[0] << " <entrada.pbm> <saida.pbm>" << '\n';
         return 1;
     }
 
     string nomeArquivo = argv[1];
     string nomeArquivoSaida = argv[2];
-
     ifstream arquivo(nomeArquivo);
     ofstream arquivoSaida(nomeArquivoSaida);
 
@@ -212,10 +330,7 @@ int main(int argc, char* argv[]) {
 
             sort(mediana.begin(), mediana.end());
             matrizFiltrada[i][j] = mediana[mediana.size() / 2];
-            arquivoSaida << mediana[mediana.size() / 2];
         }
-
-        arquivoSaida << endl;
     }
 
     for(int i = 0; i < h; i++) {
@@ -225,7 +340,6 @@ int main(int argc, char* argv[]) {
             }
         }
     }
-
     
     int extremoE = INF;
     int extremoD = -INF;
@@ -240,6 +354,29 @@ int main(int argc, char* argv[]) {
             vector<pair<int, int>> componenteConexo;
             dfs({parPonto.first, parPonto.second}, matrizFiltrada, cor, h, w, componenteConexo, extremos);
             if(componenteConexo.size() > 4) {
+                int alturaComponente = extremos.extremoB - extremos.extremoC;
+                int larguraComponente = extremos.extremoD - extremos.extremoE;
+
+
+                // Filtros -----------------------------
+                // Ignora partes pequenas demais para serem letra
+                if(alturaComponente <= 10 && larguraComponente <= 7) continue;
+
+                // Ignora pontuação (',', '.', ':', ';')
+                if((int)componenteConexo.size() < 22) continue;
+
+                // Ignora linhas retas verticais entre colunas (muito estreitas e muito altas)
+                if(larguraComponente <= 2 && alturaComponente > 50) continue;
+
+                // Ignora o "?"
+                if(larguraComponente >= 5 && alturaComponente <= 15) {
+                    double area = (double)(alturaComponente + 1) * (larguraComponente + 1);
+                    double densidade = (double)componenteConexo.size() / area;
+                    if(densidade < 0.25) continue;
+                }
+                // -------------------------------------
+
+
                 Letra letra;
                 letra.borda.cantoID = {extremos.extremoB + 1, extremos.extremoD + 1}; // Somamos ou diminuimos um pra realmente criar uma borda
                 letra.borda.cantoIE = {extremos.extremoB + 1, extremos.extremoE - 1};
@@ -268,12 +405,76 @@ int main(int argc, char* argv[]) {
         return esquerdaX(a) < esquerdaX(b);
     });
 
-    // Agora eu preciso tirar a diferença entre os componentes que foram ordenados, uma vez que agora eu tenho o ponto mais abaixo e mais 
-    // a direita de cada componente (sempre vai ser o primeiro elemento de acordo com a primeira ordenação que eu fiz)
+    // -----------------------------------------------
+    // Contador de linhas, colunas e palavras
+    // -----------------------------------------------
+
+    int contadorLinhas = 1;
+    int contadorColunas = 0;
+
+    // Desenha a linha da primeira letra até a próxima (após ordenação em ordem de leitura)
+    if (!conjuntoLetras.empty()) { 
+        vector<tuple<int, int, int, int, int>> valores;
+
+        for(int i = 1; i < conjuntoLetras.size(); i++) {
+            auto& atual = conjuntoLetras[i];
+            auto& anterior = conjuntoLetras[i-1];
+            
+            int yAtual = centroY(atual);
+            int yAnterior = centroY(anterior);
+
+            int xAnterior = (esquerdaX(anterior) + direitaX(anterior)) / 2;
+            int xAtual = (esquerdaX(atual) + direitaX(atual)) / 2;
+
+            // Só desenha se as letras estão próximas (não cruza entre colunas)
+            
+            int diffX = atual.borda.cantoIE.second - anterior.borda.cantoID.second;
+            if(diffX >= 5 && diffX < 350 && abs(xAtual - xAnterior) > 35) {
+                valores.push_back({atual.borda.cantoIE.second, esquerdaX(anterior), esquerdaX(atual), yAtual, xAtual});
+            }
+        }
+
+    }    
 
     int contadorLetras = conjuntoLetras.size();
     int contadorPalavras = 0;
-    int threshold = 13;
+
+    // Coleta todos os gaps horizontais entre letras consecutivas na mesma linha
+    vector<int> todosGaps;
+    if(!conjuntoLetras.empty()) {
+        for(int i = 1; i < (int)conjuntoLetras.size(); i++) {
+            auto& atual = conjuntoLetras[i];
+            auto& anterior = conjuntoLetras[i-1];
+
+            int yAtual = centroY(atual);
+            int yAnterior = centroY(anterior);
+
+            // Só considera gaps na mesma linha
+            if(abs(yAtual - yAnterior) <= 12) {
+                int diffX = atual.borda.cantoIE.second - anterior.borda.cantoID.second - 1;
+                if(diffX > 0) {
+                    todosGaps.push_back(diffX);
+                }
+            }
+        }
+    }
+
+    // Encontra o threshold ótimo baseado na mediana dos gaps
+    int threshold = 8; // fallback
+    if(!todosGaps.empty()) {
+        vector<int> gapsTexto;
+        for(int g : todosGaps) {
+            if(g > 0 && g <= 80) gapsTexto.push_back(g);
+        }
+
+        if(!gapsTexto.empty()) {
+            sort(gapsTexto.begin(), gapsTexto.end());
+            int mediana = gapsTexto[gapsTexto.size() / 2];
+            threshold = max(4, (int)(mediana * 2.5));
+        }
+    }
+
+    contadorColunas = contarColunasPorProjecaoVertical(matrizFiltrada);
 
     vector<vector<Letra>> palavras;
     
@@ -281,7 +482,7 @@ int main(int argc, char* argv[]) {
         contadorPalavras = 1;
         vector<Letra> palavra;
         palavra.push_back(conjuntoLetras[0]);
-        for(int i = 1; i < conjuntoLetras.size(); i++) {
+        for(int i = 1; i < (int)conjuntoLetras.size(); i++) {
             
             auto& atual = conjuntoLetras[i];
             auto& anterior = conjuntoLetras[i-1];
@@ -297,6 +498,7 @@ int main(int argc, char* argv[]) {
                 palavras.push_back(palavra);
                 palavra.clear();
                 palavra.push_back(atual);
+                contadorLinhas++;
                 continue;
             }
 
@@ -310,10 +512,34 @@ int main(int argc, char* argv[]) {
             
             palavra.push_back(atual);
         }
+
+        // Adiciona a última palavra que ficou pendente
+        if(!palavra.empty()) {
+            palavras.push_back(palavra);
+        }
     }
 
-    cout << "Letras: " << contadorLetras << endl;
+    // -----------------------------------------------
+
+
+
+    // cout << "Letras: " << contadorLetras << endl;
     cout << "Palavras: " << contadorPalavras << endl;
+    cout << "Linhas: " << contadorLinhas << endl;
+    cout << "Colunas: " << contadorColunas << endl;
+
+    // Pinta as bordas das palavras na matrizfiltrada
+    if(!palavras.empty()) {
+        pintarBorda(palavras, matrizFiltrada, h, w);
+    }
+
+    // Gera a imagem PPM com as palavras e suas respectivas bordas
+    for(int i = 0; i < h; i++) {
+        for(int j = 0; j < w; j++) {
+            arquivoSaida << matrizFiltrada[i][j];
+        }
+        arquivoSaida << endl;
+    }
 
     arquivo.close();
     return 0;

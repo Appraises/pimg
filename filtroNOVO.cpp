@@ -32,14 +32,61 @@ typedef struct {
   Borda borda;
 } Letra;
 
+typedef struct {
+  vector<Letra> letras;
+  vector<int> centrosY;
+  int centroYReferencia;
+} LinhaTexto;
 int centroY(const Letra &l) {
   return (l.borda.cantoSE.first + l.borda.cantoIE.first) / 2;
 }
 
-auto esquerdaX = [](const Letra &l) { return l.borda.cantoIE.second; };
+int topoYReal(const Letra &l) { return l.borda.cantoSE.first + 1; }
 
-auto direitaX = [](const Letra &l) { return l.borda.cantoID.second; };
+int baseYReal(const Letra &l) { return l.borda.cantoIE.first - 1; }
 
+int esquerdaXReal(const Letra &l) { return l.borda.cantoIE.second + 1; }
+
+int direitaXReal(const Letra &l) { return l.borda.cantoID.second - 1; }
+
+int alturaReal(const Letra &l) { return baseYReal(l) - topoYReal(l) + 1; }
+
+int larguraReal(const Letra &l) {
+  return direitaXReal(l) - esquerdaXReal(l) + 1;
+}
+
+int medianaInteira(vector<int> valores) {
+  if (valores.empty())
+    return 0;
+
+  size_t meio = valores.size() / 2;
+  nth_element(valores.begin(), valores.begin() + meio, valores.end());
+  return valores[meio];
+}
+
+int estimarAlturaReferencia(const vector<Letra> &letras) {
+  vector<pair<int, double>> alturasComPeso;
+  double pesoTotal = 0.0;
+
+  for (const Letra &letra : letras) {
+    double peso = sqrt((double)letra.pixels.size());
+    alturasComPeso.push_back({alturaReal(letra), peso});
+    pesoTotal += peso;
+  }
+
+  if (alturasComPeso.empty())
+    return 0;
+
+  sort(alturasComPeso.begin(), alturasComPeso.end());
+  double pesoAcumulado = 0.0;
+  for (const auto &[altura, peso] : alturasComPeso) {
+    pesoAcumulado += peso;
+    if (pesoAcumulado >= pesoTotal / 2.0)
+      return altura;
+  }
+
+  return alturasComPeso.back().first;
+}
 int menorX(vector<pair<int, int>> &componente) {
   int resposta = INF;
 
@@ -64,7 +111,6 @@ int menorXNaAltura(vector<pair<int, int>> &componente, int altura) {
   int resposta = INF;
 
   for (auto &ponto : componente) {
-    int x = ponto.second;
     int y = ponto.first;
 
     if (y == altura) {
@@ -79,7 +125,6 @@ int maiorXNaAltura(vector<pair<int, int>> &componente, int altura) {
   int resposta = INT_MIN;
 
   for (auto &ponto : componente) {
-    int x = ponto.second;
     int y = ponto.first;
 
     if (y == altura) {
@@ -165,25 +210,32 @@ int contarColunasPorProjecaoVertical(
 void dfs(pair<int, int> inicio, vector<vector<int>> &matriz,
          vector<vector<int>> &cor, int n, int m,
          vector<pair<int, int>> &componenteConexo, Extremos &extremos) {
-  int i = inicio.first;
-  int j = inicio.second;
-  cor[i][j] = 1;
-  componenteConexo.push_back(inicio);
-
-  extremos.extremoE = min(extremos.extremoE, j);
-  extremos.extremoD = max(extremos.extremoD, j);
-  extremos.extremoB = max(extremos.extremoB, i);
-  extremos.extremoC = min(extremos.extremoC, i);
   int dx[4] = {1, -1, 0, 0};
   int dy[4] = {0, 0, 1, -1};
+  vector<pair<int, int>> pilha = {inicio};
+  cor[inicio.first][inicio.second] = 1;
 
-  for (int d = 0; d < 4; d++) {
-    int ni = inicio.first + dx[d];
-    int nj = inicio.second + dy[d];
+  while (!pilha.empty()) {
+    pair<int, int> atual = pilha.back();
+    pilha.pop_back();
 
-    if (ehValido(ni, nj, n, m) && cor[ni][nj] == 0) {
-      if (matriz[ni][nj] == 1) {
-        dfs({ni, nj}, matriz, cor, n, m, componenteConexo, extremos);
+    int i = atual.first;
+    int j = atual.second;
+    componenteConexo.push_back(atual);
+
+    extremos.extremoE = min(extremos.extremoE, j);
+    extremos.extremoD = max(extremos.extremoD, j);
+    extremos.extremoB = max(extremos.extremoB, i);
+    extremos.extremoC = min(extremos.extremoC, i);
+
+    for (int d = 0; d < 4; d++) {
+      int ni = i + dx[d];
+      int nj = j + dy[d];
+
+      if (ehValido(ni, nj, n, m) && cor[ni][nj] == 0 &&
+          matriz[ni][nj] == 1) {
+        cor[ni][nj] = 1;
+        pilha.push_back({ni, nj});
       }
     }
   }
@@ -347,7 +399,7 @@ int main(int argc, char *argv[]) {
   int extremoB = -INF;
   int extremoC = INF;
 
-  for (int i = 0; i < pontosPretos.size(); i++) {
+  for (size_t i = 0; i < pontosPretos.size(); i++) {
     Extremos extremos = {extremoE, extremoD, extremoB, extremoC};
     pair<int, int> parPonto = pontosPretos[i];
     if (cor[parPonto.first][parPonto.second] == 0) {
@@ -355,33 +407,6 @@ int main(int argc, char *argv[]) {
       dfs({parPonto.first, parPonto.second}, matrizFiltrada, cor, h, w,
           componenteConexo, extremos);
       if (componenteConexo.size() > 4) {
-        int alturaComponente = extremos.extremoB - extremos.extremoC;
-        int larguraComponente = extremos.extremoD - extremos.extremoE;
-
-        // Filtros
-        // Ignora partes pequenas demais para serem letra
-        if (alturaComponente <= 10 && larguraComponente <= 7)
-          continue;
-
-        // Ignora pontuação (',', '.', ':', ';')
-        if ((int)componenteConexo.size() < 22)
-          continue;
-
-        // Ignora linhas retas verticais entre colunas (muito estreitas e muito
-        // altas)
-        if (larguraComponente <= 2 && alturaComponente > 50)
-          continue;
-
-        // Ignora o "?"
-        if (larguraComponente >= 5 && alturaComponente <= 15) {
-          double area =
-              (double)(alturaComponente + 1) * (larguraComponente + 1);
-          double densidade = (double)componenteConexo.size() / area;
-          if (densidade < 0.25)
-            continue;
-        }
-        // -------------------------------------
-
         Letra letra;
         letra.borda.cantoID = {
             extremos.extremoB + 1,
@@ -398,141 +423,131 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  int toleranciaLinha = 10;
+  // Estima a escala antes de descartar pontos, acentos e pontuacao.
+  int alturaReferencia = estimarAlturaReferencia(conjuntoLetras);
+  int alturaMinima = max(2, (int)ceil(alturaReferencia * 0.60));
 
-  // Ordeno as palavras de cima pra baixo e da esquerda pra direita
+  vector<Letra> letrasComAlturaValida;
+  for (Letra &letra : conjuntoLetras) {
+    int altura = alturaReal(letra);
+    if (altura < alturaMinima)
+      continue;
+
+    letrasComAlturaValida.push_back(move(letra));
+  }
+
+  conjuntoLetras.clear();
+  int larguraMaximaSeparador =
+      max(1, (int)ceil(alturaReferencia * 0.20));
+  for (Letra &letra : letrasComAlturaValida) {
+    bool separadorVertical = larguraReal(letra) <= larguraMaximaSeparador &&
+                             alturaReal(letra) > alturaReferencia * 2.50;
+    if (!separadorVertical)
+      conjuntoLetras.push_back(move(letra));
+  }
+
+  // Ordenacao estrita por Y; a comparacao fuzzy antiga nao era transitiva.
   sort(conjuntoLetras.begin(), conjuntoLetras.end(),
-       [&](const Letra &a, const Letra &b) {
-         int yA = centroY(a);
-         int yB = centroY(b);
-
-         // Usando o centro da palavra + tolerancia pra não dar falso positivo
-         // por conta de letras tipo p
-         if (abs(yA - yB) > toleranciaLinha) {
-           return yA < yB;
-         }
-
-         return esquerdaX(a) < esquerdaX(b);
+       [](const Letra &a, const Letra &b) {
+         if (centroY(a) != centroY(b))
+           return centroY(a) < centroY(b);
+         return esquerdaXReal(a) < esquerdaXReal(b);
        });
 
+  int toleranciaLinha = max(2, (int)lround(alturaReferencia * 0.65));
+  vector<LinhaTexto> linhas;
+  for (const Letra &letra : conjuntoLetras) {
+    int y = centroY(letra);
+    int melhorLinha = -1;
+    int menorDistancia = INF;
+
+    for (int i = 0; i < (int)linhas.size(); i++) {
+      int distancia = abs(y - linhas[i].centroYReferencia);
+      if (distancia <= toleranciaLinha && distancia < menorDistancia) {
+        menorDistancia = distancia;
+        melhorLinha = i;
+      }
+    }
+
+    if (melhorLinha == -1) {
+      linhas.push_back({{letra}, {y}, y});
+    } else {
+      LinhaTexto &linha = linhas[melhorLinha];
+      linha.letras.push_back(letra);
+      linha.centrosY.push_back(y);
+      linha.centroYReferencia = medianaInteira(linha.centrosY);
+    }
+  }
+
+  sort(linhas.begin(), linhas.end(),
+       [](const LinhaTexto &a, const LinhaTexto &b) {
+         return a.centroYReferencia < b.centroYReferencia;
+       });
+
+  for (LinhaTexto &linha : linhas) {
+    sort(linha.letras.begin(), linha.letras.end(),
+         [](const Letra &a, const Letra &b) {
+           if (esquerdaXReal(a) != esquerdaXReal(b))
+             return esquerdaXReal(a) < esquerdaXReal(b);
+           return centroY(a) < centroY(b);
+         });
+  }
+
   // Contador de linhas, colunas e palavras
-  int contadorLinhas = 1;
+  int contadorLinhas = linhas.size();
   int contadorColunas = 0;
 
-  // desenha a linha da primeira letra ate a prox (dps da ordenação em ordem de
-  // leitura)
-  if (!conjuntoLetras.empty()) {
-    vector<tuple<int, int, int, int, int>> valores;
-
-    for (int i = 1; i < conjuntoLetras.size(); i++) {
-      auto &atual = conjuntoLetras[i];
-      auto &anterior = conjuntoLetras[i - 1];
-
-      int yAtual = centroY(atual);
-      int yAnterior = centroY(anterior);
-
-      int xAnterior = (esquerdaX(anterior) + direitaX(anterior)) / 2;
-      int xAtual = (esquerdaX(atual) + direitaX(atual)) / 2;
-
-      // so desenha se as letras estão próximas (nao cruza entre colunas)
-
-      int diffX = atual.borda.cantoIE.second - anterior.borda.cantoID.second;
-      if (diffX >= 5 && diffX < 350 && abs(xAtual - xAnterior) > 35) {
-        valores.push_back({atual.borda.cantoIE.second, esquerdaX(anterior),
-                           esquerdaX(atual), yAtual, xAtual});
-      }
-    }
-  }
-
-  int contadorLetras = conjuntoLetras.size();
   int contadorPalavras = 0;
-
-  // coleta todos os gaps horizontais entre letras consecutivas na mesma linha
+  // Mede os espacos usando as caixas reais, sem o padding de desenho.
   vector<int> todosGaps;
-  if (!conjuntoLetras.empty()) {
-    for (int i = 1; i < (int)conjuntoLetras.size(); i++) {
-      auto &atual = conjuntoLetras[i];
-      auto &anterior = conjuntoLetras[i - 1];
-
-      int yAtual = centroY(atual);
-      int yAnterior = centroY(anterior);
-
-      // so considera gaps na mesma linha
-      if (abs(yAtual - yAnterior) <= 12) {
-        int diffX =
-            atual.borda.cantoIE.second - anterior.borda.cantoID.second - 1;
-        if (diffX > 0) {
-          todosGaps.push_back(diffX);
-        }
-      }
+  for (const LinhaTexto &linha : linhas) {
+    for (int i = 1; i < (int)linha.letras.size(); i++) {
+      int gap = esquerdaXReal(linha.letras[i]) -
+                direitaXReal(linha.letras[i - 1]) - 1;
+      if (gap > 0)
+        todosGaps.push_back(gap);
     }
   }
 
-  // Encontra o threshold ótimo baseado na mediana dos gaps
-  int threshold = 8; // fallback
-  if (!todosGaps.empty()) {
-    vector<int> gapsTexto;
-    for (int g : todosGaps) {
-      if (g > 0 && g <= 80)
-        gapsTexto.push_back(g);
-    }
-
-    if (!gapsTexto.empty()) {
-      sort(gapsTexto.begin(), gapsTexto.end());
-      int mediana = gapsTexto[gapsTexto.size() / 2];
-      threshold = max(4, (int)(mediana * 2.5));
-    }
+  int threshold = max(1, (int)lround(alturaReferencia * 0.35));
+  vector<int> gapsCalibracao;
+  int limiteGapCalibracao =
+      max(1, (int)lround(alturaReferencia * 1.50));
+  for (int gap : todosGaps) {
+    if (gap <= limiteGapCalibracao)
+      gapsCalibracao.push_back(gap);
   }
-
+  if (!gapsCalibracao.empty()) {
+    threshold = max(threshold, medianaInteira(gapsCalibracao) * 2);
+  }
   contadorColunas = contarColunasPorProjecaoVertical(matrizFiltrada);
 
   vector<vector<Letra>> palavras;
+  for (const LinhaTexto &linha : linhas) {
+    if (linha.letras.empty())
+      continue;
 
-  if (!conjuntoLetras.empty()) {
-    contadorPalavras = 1;
-    vector<Letra> palavra;
-    palavra.push_back(conjuntoLetras[0]);
-    for (int i = 1; i < (int)conjuntoLetras.size(); i++) {
+    contadorPalavras++;
+    vector<Letra> palavra = {linha.letras[0]};
+    for (int i = 1; i < (int)linha.letras.size(); i++) {
+      const Letra &atual = linha.letras[i];
+      const Letra &anterior = linha.letras[i - 1];
+      int gap = esquerdaXReal(atual) - direitaXReal(anterior) - 1;
 
-      auto &atual = conjuntoLetras[i];
-      auto &anterior = conjuntoLetras[i - 1];
-
-      int yAtual = centroY(atual);
-      int yAnterior = centroY(anterior);
-      int toleranciaLinha = 12;
-
-      // Se a diferença do centro deles for de até 4 pixels, tá tranquilo, se
-      // for maior do que isso, eh uma linha nova
-      if (abs(yAtual - yAnterior) > toleranciaLinha) {
-        // Achamos uma nova linha, somo uma nova palavra
-        contadorPalavras++;
+      if (gap >= threshold) {
         palavras.push_back(palavra);
         palavra.clear();
-        palavra.push_back(atual);
-        contadorLinhas++;
-        continue;
-      }
-
-      int diffX = atual.borda.cantoIE.second - anterior.borda.cantoID.second -
-                  1; // Diferença entre elas
-
-      if (diffX >= threshold) { // Se essa diferença for maior do que o meu
-                                // limiar, tengo mais uma palavra
         contadorPalavras++;
-        palavras.push_back(palavra);
-        palavra.clear();
       }
 
       palavra.push_back(atual);
     }
 
-    // Adiciona a última palavra que ficou pendente
     if (!palavra.empty()) {
       palavras.push_back(palavra);
     }
   }
 
-  // cout << "Letras: " << contadorLetras << endl; :(
   cout << "Palavras: " << contadorPalavras << endl;
   cout << "Linhas: " << contadorLinhas << endl;
   cout << "Colunas: " << contadorColunas << endl;

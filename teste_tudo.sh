@@ -3,7 +3,7 @@
 EXEC_CPP="./filtromediana"
 CPP_FILE="filtromediana.cpp"
 MD_FILE="relatorio_comparacao.md"
-DIRETORIO_ARQUIVOS="./arquivos_teste"
+DIRETORIO_ARQUIVOS="./arquivos"
 
 echo "========================================"
 echo "Iniciando comparação PBM vs PDF/ODT"

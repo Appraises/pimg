@@ -1,0 +1,251 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazil]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{ragged2e}
+\usepackage{indentfirst}
+\usepackage{enumitem}
+
+\geometry{left=30mm,top=30mm,right=20mm,bottom=20mm}
+\setlength{\parindent}{20pt}
+\justifying
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[R]{\thepage}
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue}
+
+\definecolor{codebackground}{HTML}{F7F7F7}
+\definecolor{codecomment}{HTML}{008000}
+\definecolor{codekeyword}{HTML}{0000AA}
+\lstdefinestyle{cppstyle}{
+  backgroundcolor=\color{codebackground},
+  basicstyle=\ttfamily\footnotesize,
+  commentstyle=\color{codecomment},
+  keywordstyle=\color{codekeyword},
+  breaklines=true,
+  frame=single,
+  numbers=left,
+  numbersep=5pt,
+  showstringspaces=false,
+  tabsize=4
+}
+\lstset{style=cppstyle}
+
+\begin{document}
+\pagenumbering{gobble}
+
+\begin{titlepage}
+\begin{center}
+  \IfFileExists{figs/logo-ufs1.jpg}{\includegraphics[scale=0.10]{figs/logo-ufs1.jpg}\par\vspace{0.5cm}}{}
+  \textbf{\large Universidade Federal de Sergipe}\\
+  \textbf{\large Departamento de Computação}\\
+  \textbf{\large Docente: Beatriz Trinchão Andrade}\\
+
+  \vspace{1.5cm}
+  \textbf{\Large Análise Estrutural e Pré-processamento para OCR em Imagens Binárias}\\
+  \vspace{0.5cm}
+  \textbf{\large Processamento de Imagens -- T01 2026.1}\\
+
+  \vfill
+  \textbf{\large Discentes}\\
+  Arthur Vinícius Costa Barreto\\
+  Bruno Lopes dos Santos\\
+  Filipe Ciríaco Marcelino do Nascimento\\
+  José Marcos Bittencourt Oliveira Prado\\
+
+  \vfill
+  São Cristóvão -- SE\\
+  15 de julho de 2026
+\end{center}
+\end{titlepage}
+
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+\section{Introdução}
+
+Este relatório apresenta o desenvolvimento de um programa em C++ voltado ao pré-processamento e à análise estrutural de imagens de texto binárias no formato P1 PBM. O programa aplica um filtro de mediana, extrai componentes conexos e estima as quantidades de colunas, linhas e palavras. Como saída, ele gera uma imagem PBM com caixas delimitadoras em volta das palavras encontradas.
+
+O foco não é reconhecer o significado de cada caractere, mas recuperar a estrutura espacial do documento. Por isso, a solução foi construída com técnicas clássicas de Processamento de Imagens e Teoria dos Grafos, sem usar modelos de aprendizado de máquina.
+
+\section{Metodologia}
+
+\subsection{Leitura e filtro de mediana}
+
+A imagem P1 PBM é lida como uma matriz binária. Para reduzir ruídos impulsivos, cada pixel é substituído pela mediana de sua vizinhança $3 \times 3$, considerando apenas os vizinhos válidos nas bordas. Como a imagem é binária, essa mediana funciona como uma decisão por maioria na janela: pixels isolados tendem a desaparecer, enquanto os traços principais dos caracteres são mantidos.
+
+\subsection{Extração de componentes candidatos}
+
+Depois da filtragem, os pixels pretos são agrupados usando conectividade de quatro vizinhos: cima, baixo, esquerda e direita. A busca é feita com uma pilha explícita, ou seja, uma DFS iterativa. Essa escolha evita o risco de estourar a pilha de chamadas quando uma fonte muito grande gera componentes extensos. Nessa etapa, os agrupamentos são tratados como \emph{componentes candidatos}: o corpo de uma letra, o ponto de um \textit{i}, um acento ou uma marca de pontuação podem formar componentes diferentes, mas nem todos devem entrar no layout do texto.
+
+Antes de descartar qualquer componente, são coletados os extremos de sua caixa delimitadora. Com esses extremos, depois é possível calcular altura, largura, centro vertical (\texttt{centroY}) e gaps horizontais reais. Para cada componente candidato, ficam armazenados:
+
+\begin{itemize}
+  \item os pixels pertencentes ao componente;
+  \item os extremos esquerdo, direito, superior e inferior;
+  \item uma \textit{bounding box} usada posteriormente para layout e desenho.
+\end{itemize}
+
+\section{Segmentação adaptativa ao tamanho da fonte}
+
+\subsection{Motivação}
+
+Na primeira versão do programa, os limites eram valores absolutos em pixels. Eles eram usados para filtrar componentes, decidir se duas letras pertenciam à mesma linha e identificar separações entre palavras. Essa estratégia funcionava nos arquivos de referência em fonte 12, mas falhava quando a fonte era ampliada: pontos de \textit{i/j}, acentos e pontuação podiam passar a ser tratados como letras. Além disso, letras da mesma linha podiam ter centros verticais separados por mais do que o limite fixo.
+
+Com isso, o programa podia aumentar incorretamente as contagens de linhas e palavras. Para resolver esse problema, substituímos decisões baseadas em pixels fixos por medidas relativas à altura típica do texto presente na própria imagem.
+
+\subsection{Estimativa da altura de referência}
+
+No início, todos os componentes são mantidos para estimar a altura de referência $H$. A altura de cada componente recebe o peso
+
+\[
+p = \sqrt{\text{quantidade de pixels do componente}}.
+\]
+
+Em seguida, calculamos a mediana ponderada das alturas. Esse peso diminui a influência de pontos, acentos e ruídos pequenos, já que o corpo de uma letra normalmente possui mais pixels do que uma marca isolada. A raiz quadrada evita que caracteres muito largos ou espessos tenham influência exagerada na estimativa.
+
+\begin{lstlisting}[language=C++,caption={Estimativa ponderada da altura típica do texto.}]
+int estimarAlturaReferencia(const vector<Letra> &letras) {
+    vector<pair<int, double>> alturasComPeso;
+    double pesoTotal = 0.0;
+
+    for (const Letra &letra : letras) {
+        double peso = sqrt((double)letra.pixels.size());
+        alturasComPeso.push_back({alturaReal(letra), peso});
+        pesoTotal += peso;
+    }
+
+    sort(alturasComPeso.begin(), alturasComPeso.end());
+    double acumulado = 0.0;
+    for (const auto &[altura, peso] : alturasComPeso) {
+        acumulado += peso;
+        if (acumulado >= pesoTotal / 2.0) return altura;
+    }
+    return alturasComPeso.back().first;
+}
+\end{lstlisting}
+
+\subsection{Filtragem proporcional de componentes}
+
+Depois de estimar $H$, um componente só participa do layout como corpo de caractere se sua altura for pelo menos
+
+\[
+\left\lceil 0{,}60H \right\rceil.
+\]
+
+Dessa forma, um ponto ou acento continua sendo pequeno em relação ao corpo da letra mesmo quando a imagem é ampliada. Também removemos separadores verticais entre colunas quando eles satisfazem ao mesmo tempo:
+
+\[
+\text{largura} \leq \left\lceil 0{,}20H \right\rceil
+\quad \text{e} \quad
+\text{altura} > 2{,}50H.
+\]
+
+Essas regras substituem os antigos cortes fixos de área, largura e altura. As marcas pequenas continuam na imagem filtrada, mas não entram na decisão estrutural de linha ou palavra.
+
+\subsection{Agrupamento em linhas}
+
+As letras que restam são ordenadas primeiro pelo centro vertical e, em caso de empate, pela posição horizontal. Essa ordenação é determinística e respeita o contrato de \texttt{std::sort}. A versão anterior alternava regras de comparação por $X$ e $Y$, o que podia gerar uma relação não transitiva.
+
+Depois da ordenação, cada letra é associada à linha existente cujo centro vertical de referência esteja mais próximo, desde que a distância seja menor ou igual a
+
+\[
+\operatorname{round}(0{,}65H).
+\]
+
+Se não existir uma linha compatível, uma nova linha é criada. O centro de referência de cada linha é recalculado pela mediana dos centros verticais de suas letras. Por fim, as letras de cada linha são ordenadas da esquerda para a direita.
+
+Essa etapa é importante porque gaps horizontais só fazem sentido entre letras da mesma linha. A segmentação de palavras só acontece depois do agrupamento vertical, pois gaps horizontais entre componentes de linhas diferentes não possuem significado linguístico. Sem essa separação, letras de linhas diferentes poderiam ser lidas como uma única sequência e gerar palavras falsas.
+
+\subsection{Segmentação adaptativa de palavras}
+
+Para duas letras consecutivas da mesma linha, o espaço horizontal real é calculado usando as caixas sem a margem de desenho:
+
+\[
+g = x_{\text{esquerda, atual}} - x_{\text{direita, anterior}} - 1.
+\]
+
+Todos os gaps positivos são coletados. O limite inicial para quebrar uma palavra é
+
+\[
+T_0 = \max(1,\operatorname{round}(0{,}35H)).
+\]
+
+Para estimar o espaçamento normal entre letras, entram na amostra de calibração somente gaps menores ou iguais a
+
+\[
+L = \max(1,\operatorname{round}(1{,}50H)).
+\]
+
+Gaps maiores, geralmente ligados ao vão entre colunas, não influenciam a mediana. Mesmo assim, eles continuam participando da segmentação final e fecham uma palavra normalmente. Se a amostra não estiver vazia, o limite final é
+
+\[
+T = \max(T_0, 2 \cdot \operatorname{mediana}(\text{gaps de calibração})).
+\]
+
+O fator $2$ cria uma margem entre o espaçamento mais comum dentro de uma palavra e o espaço entre palavras. Por exemplo, para gaps $[2,3,3,11,2]$, a mediana é $3$. Se o limite final for $6$, os gaps $2$ e $3$ mantêm as letras na mesma palavra, enquanto o gap $11$ inicia uma nova palavra. Para cada linha não vazia, a primeira letra inicia uma palavra; uma nova palavra é iniciada sempre que $g \geq T$.
+
+\subsection{Detecção de colunas por projeção vertical}
+
+Para contar as colunas, usamos a projeção vertical da matriz filtrada. Para cada coordenada horizontal $j$, somamos a quantidade de pixels pretos daquela coluna. Uma posição é considerada ativa quando sua ocupação é pelo menos
+
+\[
+\max(3, h/300),
+\]
+
+em que $h$ é a altura da imagem. Faixas contíguas ativas com largura mínima
+
+\[
+\max(20, w/40),
+\]
+
+são contadas como colunas de texto.
+
+Essa etapa é independente do agrupamento de palavras. Enquanto a projeção vertical procura blocos ocupados de texto na página inteira, a segmentação de linhas e palavras trabalha com componentes candidatos e suas caixas delimitadoras. Assim, o vão entre duas colunas pode encerrar uma palavra no fluxo horizontal, mas a quantidade de colunas é definida apenas pelo perfil de projeção.
+
+\section{Instruções de compilação e execução}
+
+O arquivo principal usado pelo script de testes é \texttt{filtromediana.cpp}. O arquivo \texttt{filtroNOVO.cpp} contém a mesma lógica, apenas em uma versão formatada.
+
+\subsection{Compilação}
+
+\begin{lstlisting}[language=bash]
+g++ -std=c++17 -O2 filtromediana.cpp -o filtromediana
+\end{lstlisting}
+
+\subsection{Execução}
+
+O programa recebe um arquivo PBM de entrada e outro de saída:
+
+\begin{lstlisting}[language=bash]
+./filtromediana entrada.pbm saida.pbm
+\end{lstlisting}
+
+No console, são mostradas as contagens de palavras, linhas e colunas. O segundo argumento recebe uma imagem P1 PBM binária com as caixas das palavras desenhadas. Embora a rotina de desenho tenha sido criada para delimitar visualmente as palavras, a versão atual não gera uma imagem colorida RGB ou PPM.
+
+\subsection{Testes}
+
+O script \texttt{teste\_tudo.sh} compila \texttt{filtromediana.cpp}, processa os arquivos PBM da pasta \texttt{arquivos} e compara as contagens com o texto extraído dos arquivos ODT/PDF correspondentes. Para executá-lo em um ambiente Linux, é necessário ter \texttt{g++}, \texttt{odt2txt}, \texttt{pdftotext} e \texttt{unzip} instalados:
+
+\begin{lstlisting}[language=bash]
+chmod +x teste_tudo.sh
+./teste_tudo.sh
+\end{lstlisting}
+
+Também usamos uma transformação metamórfica na validação: ampliar uma imagem por vizinho mais próximo não muda seu conteúdo semântico. Portanto, as quantidades de linhas e palavras devem continuar iguais. Nos casos avaliados, os documentos de duas e três colunas mantiveram, respectivamente, as contagens esperadas de $583/52/2$ e $557/52/3$ (palavras/linhas/colunas) depois de uma ampliação por fator $2$.
+
+\section{Conclusão}
+
+O programa junta filtro de mediana, componentes conexos, projeção vertical e segmentação geométrica para recuperar a estrutura de documentos PBM. A principal mudança foi fazer as heurísticas dependerem da altura típica do texto. Com isso, a filtragem de componentes, o agrupamento de linhas e a separação de palavras acompanham a escala da fonte, diminuindo falsos positivos em imagens com caracteres grandes e mantendo as contagens observadas no conjunto de referência.
+
+\end{document}
